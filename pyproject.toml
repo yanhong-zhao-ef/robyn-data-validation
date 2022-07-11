@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robyn_data_validation"
+version = "0.0.1"
+authors = [
+  { name="NGA dev team from Education First", email="ngadevteam@ef.com" },
+]
+description = "Data validation module accompanying the MMM open source package Robyn (https://github.com/facebookexperimental/Robyn)"
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pandas==1.4.3",
+    "numpy==1.23.0",
+    "matplotlib==3.5.2",
+    "seaborn==0.11.2",
+    "statsmodels==0.13.2"
+]
+
+
+[project.urls]
+"Homepage" = "https://github.com/yanhong-zhao-ef/robyn-data-validation"
+"Bug Tracker" = "https://github.com/yanhong-zhao-ef/robyn-data-validation/issues"
