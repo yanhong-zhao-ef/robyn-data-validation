@@ -1,11 +1,15 @@
+import logging
 import os
 import warnings
 from datetime import datetime
-from typing import Callable, Union
+from typing import Callable, List, Union
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import seaborn as sns
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 
 def number_of_days_in_a_year(year):
@@ -54,8 +58,8 @@ class DataReviewer:
 
     def __init__(
         self,
-        # independent_vars: List[str],
-        # dependent_var: str,
+        independent_vars: List[str],
+        dependent_var: str,
         file_path: str = None,
         data_frame: pd.DataFrame = pd.DataFrame(),
         date_column_name: str = "DATE",
@@ -64,6 +68,8 @@ class DataReviewer:
         review_output_dir: str = "review_output",
     ) -> None:
         self.data = self._read_input_data_source(file_path, data_frame)
+        self.independent_vars = independent_vars
+        self.dependent_var = dependent_var
         if not os.path.isdir(review_output_dir):
             os.mkdir(review_output_dir)
         output_folder = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -81,6 +87,7 @@ class DataReviewer:
         )
         self.date_frequency = date_frequency
         self._check_date_frequency()
+        self.logger = logging.getLogger("robyn_data_review")
 
     @staticmethod
     def _read_input_data_source(
@@ -235,10 +242,85 @@ class DataReviewer:
         )
         return None
 
+    def plot_correlation_heat_map_for_independent_vars(self, fig_size=(16, 12)):
+        data_for_indep_correlation = self.data[self.independent_vars]
+        # Calculate pairwise-correlation
+        matrix = data_for_indep_correlation.corr()
+        # Create a mask
+        mask = np.triu(np.ones_like(matrix, dtype=bool))
+        # Create a custom divergin palette
+        cmap = sns.diverging_palette(
+            250, 15, s=75, l=40, n=9, center="light", as_cmap=True
+        )
+        plt.figure(figsize=fig_size)
+        sns.heatmap(
+            matrix, mask=mask, center=0, annot=True, fmt=".2f", square=True, cmap=cmap
+        )
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                self.output_dir,
+                f"independent_variable_correlation_heatmap.png",
+            )
+        )
+        return None
+
+    def compute_vif(self, threshold=10):
+        """Compute Variance Inflation Factor (VIF) for the independent variable to detect multi-colinearity"""
+        data_for_vif = self.data[self.independent_vars]
+        # VIF dataframe
+        vif_data = pd.DataFrame()
+        vif_data["feature"] = data_for_vif.columns
+
+        # calculating VIF for each feature
+        vif_data["VIF"] = [
+            variance_inflation_factor(data_for_vif.values, i)
+            for i in range(len(data_for_vif.columns))
+        ]
+        pct_of_vars_violations = round((vif_data["VIF"] > threshold).mean() * 100)
+        self.logger.info(
+            f"{pct_of_vars_violations}% of the independent variables violate the vif threshold out of {len(vif_data['VIF'])} variables"
+        )
+        vif_data.to_csv(
+            os.path.join(
+                self.output_dir,
+                f"vif_independent_vars.csv",
+            )
+        )
+        return vif_data
+
+    def plot_correlation_dep_var(self, fig_size=(16, 12)):
+        columns_to_include = self.independent_vars + [self.dependent_var]
+        correlation_to_dep = self.data[columns_to_include].corr()[self.dependent_var]
+        plt.figure(figsize=fig_size)
+        ax = (
+            correlation_to_dep[correlation_to_dep.index != self.dependent_var]
+            .round(2)
+            .sort_values(ascending=False)
+            .plot.bar()
+        )
+        for p in ax.patches:
+            ax.annotate(str(p.get_height()), (p.get_x() * 1.005, p.get_height()))
+        plt.title("Correlation with dependent varialbe")
+        plt.xlabel(
+            "Examine the variables with high correlation to see if it is expected or not"
+        )
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                self.output_dir,
+                f"correlation_between_dependent_vars_and_independent_vars.png",
+            )
+        )
+        return None
+
     def run_review(self):
         self.plot_missing_values()
         self.plot_missing_data_in_a_year()
         unique_years = self.data[self.date_column_name].dt.year.unique()
         for year in unique_years:
             self.plot_monthly_tally_of_observations(year)
+        self.plot_correlation_heat_map_for_independent_vars()
+        self.compute_vif()
+        self.plot_correlation_dep_var()
         return None
