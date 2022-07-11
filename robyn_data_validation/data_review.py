@@ -60,6 +60,7 @@ class DataReviewer:
         self,
         independent_vars: List[str],
         dependent_var: str,
+        cost_vars: Union[str, List[str]] = None,
         file_path: str = None,
         data_frame: pd.DataFrame = pd.DataFrame(),
         date_column_name: str = "DATE",
@@ -70,6 +71,11 @@ class DataReviewer:
         self.data = self._read_input_data_source(file_path, data_frame)
         self.independent_vars = independent_vars
         self.dependent_var = dependent_var
+        if cost_vars is not None:
+            assert len(cost_vars) == len(
+                independent_vars
+            ), "there should be as many as cost variables as the media (independent) variables"
+        self.cost_vars = cost_vars
         if not os.path.isdir(review_output_dir):
             os.mkdir(review_output_dir)
         output_folder = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -146,6 +152,7 @@ class DataReviewer:
         plt.figtext(0.5, 0.01, f"total number of observations is {len(self.data)}")
         plt.tight_layout()
         plt.savefig(os.path.join(self.output_dir, "missing_values_overall.png"))
+        plt.close()
         return None
 
     def plot_missing_data_in_a_year(
@@ -196,6 +203,7 @@ class DataReviewer:
         plt.xlabel("Year")
         plt.tight_layout()
         plt.savefig(os.path.join(self.output_dir, "missing_yearly_values.png"))
+        plt.close()
         return None
 
     def plot_monthly_tally_of_observations(self, year_to_investigate: int):
@@ -240,6 +248,7 @@ class DataReviewer:
                 f"missing_monthly_values_of_year_{year_to_investigate}.png",
             )
         )
+        plt.close()
         return None
 
     def plot_correlation_heat_map_for_independent_vars(self, fig_size=(16, 12)):
@@ -263,6 +272,7 @@ class DataReviewer:
                 f"independent_variable_correlation_heatmap.png",
             )
         )
+        plt.close()
         return None
 
     def compute_vif(self, threshold=10):
@@ -312,6 +322,80 @@ class DataReviewer:
                 f"correlation_between_dependent_vars_and_independent_vars.png",
             )
         )
+        plt.close()
+        return None
+
+    def plot_cost_share_trend(self, fig_size=(16, 12)):
+        costs = self.data[self.cost_vars + [self.date_column_name]].set_index(
+            self.date_column_name
+        )
+        costs_pct = costs.div(costs.sum(axis=1), axis=0)
+        plt.figure()
+        ax = costs_pct.plot.area(colormap="Paired", figsize=fig_size)
+        ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
+        plt.xlabel("date")
+        plt.ylabel("percentage of total costs")
+        plt.title("Share of total media spend per channel")
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                self.output_dir,
+                f"cost_share_trend_plot.png",
+            )
+        )
+        plt.close()
+        return None
+
+    def plot_cost_trend(self, fig_size=(16, 12)):
+        costs = self.data[self.cost_vars + [self.date_column_name]].set_index(
+            self.date_column_name
+        )
+        plt.figure()
+        costs.sum(axis=1).plot.line(figsize=fig_size)
+        plt.xlabel("date")
+        plt.ylabel("total costs")
+        plt.title("Total media spend in the same time period")
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                self.output_dir,
+                f"cost_overall_trend_plot.png",
+            )
+        )
+        plt.close()
+        return None
+
+    def plot_kpi_trend(self, fig_size=(16, 12)):
+        kpi = self.data[[self.date_column_name, self.dependent_var]].set_index(
+            self.date_column_name
+        )
+        plt.figure()
+        kpi.plot.line(figsize=fig_size)
+        plt.xlabel("date")
+        plt.ylabel("Gross revenue for new students")
+        plt.title("KPI in the same time period")
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(
+                self.output_dir,
+                f"kpi_overall_trend_plot.png",
+            )
+        )
+        plt.close()
+        return None
+
+    def plot_media_trend(self):
+        media_trend_df = self.data[self.independent_vars + [self.date_column_name]]
+        media_trend_df["year"] = media_trend_df[self.date_column_name].dt.year
+        media_trend_df["day"] = media_trend_df[self.date_column_name].dt.dayofyear
+        for col in self.independent_vars:
+            rel = sns.relplot(
+                data=media_trend_df, x="day", y=col, col="year", kind="line"
+            )
+            rel.fig.suptitle(f"Trend for {col}")
+            rel.fig.subplots_adjust(top=0.8)
+            plt.savefig(os.path.join(self.output_dir, f"{col}_trend_plots.png"))
+            plt.close()
         return None
 
     def run_review(self):
@@ -323,4 +407,9 @@ class DataReviewer:
         self.plot_correlation_heat_map_for_independent_vars()
         self.compute_vif()
         self.plot_correlation_dep_var()
+        self.plot_kpi_trend()
+        self.plot_media_trend()
+        if self.cost_vars is not None:
+            self.plot_cost_trend()
+            self.plot_cost_share_trend()
         return None
