@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from robyn_data_validation import DataReviewer
+from src.robyn_data_validation import DataReviewer
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_WEEKLY_DATA_PATH = str(
