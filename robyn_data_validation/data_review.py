@@ -113,6 +113,7 @@ class DataReviewer:
                 )
             )
         ]
+        self._check_numerical_columns()
         self.date_frequency = date_frequency
         self._check_date_frequency()
         self.logger = logging.getLogger("robyn_data_review")
@@ -147,6 +148,16 @@ class DataReviewer:
                 "Please check if the date frequency is rightly selected or check if there are substantial time gaps "
                 "in the dataset"
             )
+        return None
+
+    def _check_numerical_columns(self):
+        all_numerical_columns = list(
+            set(self.indep_vars + [self.dep_var] + self.paid_media_spends)
+        )
+        for column in all_numerical_columns:
+            assert pd.api.types.is_numeric_dtype(
+                self.data[column]
+            ), f"the input data column {column} from paid media vars + paid media spends + extra vars + dep vars should be of numerical type"
         return None
 
     def plot_missing_values(self) -> None:
@@ -406,7 +417,7 @@ class DataReviewer:
         return None
 
     def plot_media_trend(self):
-        media_trend_df = self.data[self.paid_media_spends + [self.date_var]]
+        media_trend_df = self.data[self.paid_media_spends + [self.date_var]].copy()
         media_trend_df["year"] = media_trend_df[self.date_var].dt.year
         media_trend_df["day"] = media_trend_df[self.date_var].dt.dayofyear
         for col in self.paid_media_spends:
