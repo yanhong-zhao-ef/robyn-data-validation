@@ -58,24 +58,41 @@ class DataReviewer:
 
     def __init__(
         self,
-        independent_vars: List[str],
-        dependent_var: str,
-        cost_vars: Union[str, List[str]] = None,
+        dep_var: str,
+        paid_media_vars: List[str],
+        paid_media_spends: List[str],
+        extra_vars: Union[
+            str, List[str]
+        ] = None,  # combination of context vars and organic vars
+        date_var: str = "DATE",
+        date_format: Union[str, None] = None,
         file_path: str = None,
         data_frame: pd.DataFrame = pd.DataFrame(),
-        date_column_name: str = "DATE",
-        date_format: Union[str, None] = None,
         date_frequency: str = "weekly",
         review_output_dir: str = "review_output",
     ) -> None:
-        self.data = self._read_input_data_source(file_path, data_frame)
-        self.independent_vars = independent_vars
-        self.dependent_var = dependent_var
-        if cost_vars is not None:
-            assert len(cost_vars) == len(
-                independent_vars
-            ), "there should be as many as cost variables as the media (independent) variables"
-        self.cost_vars = cost_vars
+        """
+        :param dep_var:
+        :param paid_media_vars:
+        :param paid_media_spends:
+        :param extra_vars:
+        :param date_var:
+        :param date_format:
+        :param file_path:
+        :param data_frame:
+        :param date_frequency:
+        :param review_output_dir:
+        """
+        data = self._read_input_data_source(file_path, data_frame)
+        self.paid_media_vars = paid_media_vars
+        self.dep_var = dep_var
+        self.extra_vars = extra_vars
+        self.indep_vars = paid_media_vars + extra_vars
+        self.date_var = date_var
+        assert len(paid_media_spends) == len(
+            paid_media_vars
+        ), "there should be as many as paid media spend variables as the paid media variables"
+        self.paid_media_spends = paid_media_spends
         if not os.path.isdir(review_output_dir):
             os.mkdir(review_output_dir)
         output_folder = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -83,14 +100,19 @@ class DataReviewer:
         if not os.path.isdir(self.output_dir):
             os.mkdir(self.output_dir)
         # copy raw data over so there is a reference on the data that generated this
-        self.data.to_csv(
-            os.path.join(self.output_dir, "original_data.csv"), index=False
-        )
+        data.to_csv(os.path.join(self.output_dir, "original_data.csv"), index=False)
         # convert the data's date column upfront
-        self.date_column_name = date_column_name
-        self.data[date_column_name] = pd.to_datetime(
-            self.data[date_column_name], format=date_format
-        )
+        data[date_var] = pd.to_datetime(data[date_var], format=date_format)
+        self.data = data[
+            list(
+                set(
+                    [self.date_var]
+                    + self.indep_vars
+                    + [self.dep_var]
+                    + self.paid_media_spends
+                )
+            )
+        ]
         self.date_frequency = date_frequency
         self._check_date_frequency()
         self.logger = logging.getLogger("robyn_data_review")
@@ -110,19 +132,20 @@ class DataReviewer:
             return pd.read_csv(file_path)
 
     def _check_date_frequency(self, threshold: float = 0.8) -> None:
-        assert pd.api.types.is_datetime64_any_dtype(self.data[self.date_column_name])
+        assert pd.api.types.is_datetime64_any_dtype(self.data[self.date_var])
         assert self.date_frequency in [
             "weekly",
             "daily",
         ], "only daily or weekly frequency is currently supported"
-        temp_df = self.data.set_index(self.date_column_name)
+        temp_df = self.data.set_index(self.date_var)
         if self.date_frequency == "daily":
             counts = temp_df[temp_df.columns[0]].resample("1D").count()
         else:
             counts = temp_df[temp_df.columns[0]].resample("1W").count()
         if (counts == 1).mean() < threshold:
             warnings.warn(
-                "Please check if the date frequency is rightly selected or check if there are substantial time gaps in the dataset"
+                "Please check if the date frequency is rightly selected or check if there are substantial time gaps "
+                "in the dataset"
             )
         return None
 
@@ -158,11 +181,11 @@ class DataReviewer:
     def plot_missing_data_in_a_year(
         self, threshold: float = 0.05, color_map_fun: Callable = color_map
     ) -> None:
-        yearly_observation_count = self.data.groupby(
-            self.data[self.date_column_name].dt.year
-        )[self.date_column_name].count()
+        yearly_observation_count = self.data.groupby(self.data[self.date_var].dt.year)[
+            self.date_var
+        ].count()
         yearly_observation = pd.DataFrame(yearly_observation_count).rename(
-            columns={self.date_column_name: "number_of_observations"}
+            columns={self.date_var: "number_of_observations"}
         )
         if self.date_frequency == "weekly":
             yearly_observation["max_number_of_date_unit"] = [
@@ -208,11 +231,11 @@ class DataReviewer:
 
     def plot_monthly_tally_of_observations(self, year_to_investigate: int):
         full_df_year = self.data[
-            self.data[self.date_column_name].dt.year == year_to_investigate
+            self.data[self.date_var].dt.year == year_to_investigate
         ]
         monthly_observation_count = full_df_year.groupby(
-            full_df_year[self.date_column_name].dt.month
-        )[self.date_column_name].count()
+            full_df_year[self.date_var].dt.month
+        )[self.date_var].count()
         monthly_observation = pd.DataFrame(monthly_observation_count).rename(
             columns={"full_date": "number_of_observations"}
         )
@@ -252,7 +275,7 @@ class DataReviewer:
         return None
 
     def plot_correlation_heat_map_for_independent_vars(self, fig_size=(16, 12)):
-        data_for_indep_correlation = self.data[self.independent_vars]
+        data_for_indep_correlation = self.data[self.indep_vars]
         # Calculate pairwise-correlation
         matrix = data_for_indep_correlation.corr()
         # Create a mask
@@ -277,7 +300,7 @@ class DataReviewer:
 
     def compute_vif(self, threshold=10):
         """Compute Variance Inflation Factor (VIF) for the independent variable to detect multi-colinearity"""
-        data_for_vif = self.data[self.independent_vars]
+        data_for_vif = self.data[self.indep_vars]
         # VIF dataframe
         vif_data = pd.DataFrame()
         vif_data["feature"] = data_for_vif.columns
@@ -300,11 +323,11 @@ class DataReviewer:
         return vif_data
 
     def plot_correlation_dep_var(self, fig_size=(16, 12)):
-        columns_to_include = self.independent_vars + [self.dependent_var]
-        correlation_to_dep = self.data[columns_to_include].corr()[self.dependent_var]
+        columns_to_include = self.indep_vars + [self.dep_var]
+        correlation_to_dep = self.data[columns_to_include].corr()[self.dep_var]
         plt.figure(figsize=fig_size)
         ax = (
-            correlation_to_dep[correlation_to_dep.index != self.dependent_var]
+            correlation_to_dep[correlation_to_dep.index != self.dep_var]
             .round(2)
             .sort_values(ascending=False)
             .plot.bar()
@@ -326,8 +349,8 @@ class DataReviewer:
         return None
 
     def plot_cost_share_trend(self, fig_size=(16, 12)):
-        costs = self.data[self.cost_vars + [self.date_column_name]].set_index(
-            self.date_column_name
+        costs = self.data[self.paid_media_spends + [self.date_var]].set_index(
+            self.date_var
         )
         costs_pct = costs.div(costs.sum(axis=1), axis=0)
         plt.figure()
@@ -347,8 +370,8 @@ class DataReviewer:
         return None
 
     def plot_cost_trend(self, fig_size=(16, 12)):
-        costs = self.data[self.cost_vars + [self.date_column_name]].set_index(
-            self.date_column_name
+        costs = self.data[self.paid_media_spends + [self.date_var]].set_index(
+            self.date_var
         )
         plt.figure()
         costs.sum(axis=1).plot.line(figsize=fig_size)
@@ -366,9 +389,7 @@ class DataReviewer:
         return None
 
     def plot_kpi_trend(self, fig_size=(16, 12)):
-        kpi = self.data[[self.date_column_name, self.dependent_var]].set_index(
-            self.date_column_name
-        )
+        kpi = self.data[[self.date_var, self.dep_var]].set_index(self.date_var)
         plt.figure()
         kpi.plot.line(figsize=fig_size)
         plt.xlabel("date")
@@ -385,10 +406,10 @@ class DataReviewer:
         return None
 
     def plot_media_trend(self):
-        media_trend_df = self.data[self.independent_vars + [self.date_column_name]]
-        media_trend_df["year"] = media_trend_df[self.date_column_name].dt.year
-        media_trend_df["day"] = media_trend_df[self.date_column_name].dt.dayofyear
-        for col in self.independent_vars:
+        media_trend_df = self.data[self.paid_media_spends + [self.date_var]]
+        media_trend_df["year"] = media_trend_df[self.date_var].dt.year
+        media_trend_df["day"] = media_trend_df[self.date_var].dt.dayofyear
+        for col in self.paid_media_spends:
             rel = sns.relplot(
                 data=media_trend_df, x="day", y=col, col="year", kind="line"
             )
@@ -401,7 +422,7 @@ class DataReviewer:
     def run_review(self):
         self.plot_missing_values()
         self.plot_missing_data_in_a_year()
-        unique_years = self.data[self.date_column_name].dt.year.unique()
+        unique_years = self.data[self.date_var].dt.year.unique()
         for year in unique_years:
             self.plot_monthly_tally_of_observations(year)
         self.plot_correlation_heat_map_for_independent_vars()
@@ -409,7 +430,6 @@ class DataReviewer:
         self.plot_correlation_dep_var()
         self.plot_kpi_trend()
         self.plot_media_trend()
-        if self.cost_vars is not None:
-            self.plot_cost_trend()
-            self.plot_cost_share_trend()
+        self.plot_cost_trend()
+        self.plot_cost_share_trend()
         return None
